@@ -1,0 +1,155 @@
+import numpy as np
+import random
+from dataclasses import dataclass
+from collections import Counter, namedtuple
+from itertools import combinations
+
+Team = namedtuple('Team', ['name', 'rank'])
+
+@dataclass
+class TeamStats:
+    team: Team
+    points: int = 0
+    gf: int = 0
+    ga: int = 0
+    matches: int = 0
+
+def get_strength(rank: int) -> float:
+    """Calcula a força da sele\u00e7\u00e3o com base no ranking FIFA (menor rank = mais forte)."""
+    return 1.0 / rank
+
+def play_match(stats1: TeamStats, stats2: TeamStats) -> None:
+    """Simula uma partida da fase de grupos, atualizando estat\u00edsticas."""
+    t1 = stats1.team
+    t2 = stats2.team
+    s1 = get_strength(t1.rank)
+    s2 = get_strength(t2.rank)
+    lambda1 = 2.7 * s1 / (s1 + s2)
+    lambda2 = 2.7 * s2 / (s1 + s2)
+    g1 = np.random.poisson(lambda1)
+    g2 = np.random.poisson(lambda2)
+    stats1.gf += g1
+    stats1.ga += g2
+    stats2.gf += g2
+    stats2.ga += g1
+    stats1.matches += 1
+    stats2.matches += 1
+    if g1 > g2:
+        stats1.points += 3
+    elif g2 > g1:
+        stats2.points += 3
+    else:
+        stats1.points += 1
+        stats2.points += 1
+
+def rank_teams(stats_list: list[TeamStats]) -> list[TeamStats]:
+    """Classifica equipes por pontos, saldo de gols e gols marcados (descendente)."""
+    def sort_key(ts: TeamStats):
+        return (-ts.points, -(ts.gf - ts.ga), -ts.gf)
+    return sorted(stats_list, key=sort_key)
+
+def knockout_match(team1: Team, team2: Team) -> Team:
+    """Simula partida de mata-mata; em caso de empate, decide por pênaltis aleatório."""
+    s1 = get_strength(team1.rank)
+    s2 = get_strength(team2.rank)
+    lambda1 = 2.7 * s1 / (s1 + s2)
+    lambda2 = 2.7 * s2 / (s1 + s2)
+    g1 = np.random.poisson(lambda1)
+    g2 = np.random.poisson(lambda2)
+    if g1 != g2:
+        return team1 if g1 > g2 else team2
+    else:
+        return random.choice([team1, team2])
+
+def simulate_knockout(advancers: list[Team]) -> Team:
+    """Simula fase de mata-mata até definir o campeão."""
+    current_round = advancers[:]
+    random.shuffle(current_round)
+    while len(current_round) > 1:
+        next_round = []
+        for i in range(0, len(current_round), 2):
+            t1 = current_round[i]
+            t2 = current_round[i + 1]
+            winner = knockout_match(t1, t2)
+            next_round.append(winner)
+        current_round = next_round
+    return current_round[0]
+
+def print_results(champions_counter: Counter) -> None:
+    """Imprime os campeões ordenados por número de títulos."""
+    print('Campeões e número de títulos:')
+    for name, titles in champions_counter.most_common():
+        print(f'{name}: {titles}')
+
+# Dados das 211 seleções com rankings reais (top 32) e fictícios para completar
+team_data = [
+    ('Argentina', 1),
+    ('França', 2),
+    ('Espanha', 3),
+    ('Inglaterra', 4),
+    ('Brasil', 5),
+    ('Portugal', 6),
+    ('Holanda', 7),
+    ('Bélgica', 8),
+    ('Itália', 9),
+    ('Alemanha', 10),
+    ('Estados Unidos', 11),
+    ('Uruguai', 12),
+    ('Colômbia', 13),
+    ('México', 14),
+    ('Dinamarca', 15),
+    ('Suíça', 16),
+    ('Japão', 17),
+    ('Senegal', 18),
+    ('Irã', 19),
+    ('Marrocos', 20),
+    ('Coreia do Sul', 21),
+    ('Austrália', 22),
+    ('Croácia', 23),
+    ('Ucrânia', 24),
+    ('Áustria', 25),
+    ('País de Gales', 26),
+    ('Tunísia', 27),
+    ('Polônia', 28),
+    ('Sérvia', 29),
+    ('Suécia', 30),
+    ('Egito', 31),
+    ('Turquia', 32)
+] + [(f'Nação {i}', i) for i in range(33, 212)]
+
+teams: list[Team] = [Team(name, rank) for name, rank in team_data]
+probs = np.array([get_strength(t.rank) for t in teams])
+probs /= probs.sum()
+
+def simulate_world_cup(num_editions: int = 10000) -> Counter:
+    """Simula múltiplas edições da Copa do Mundo com 48 seleções, grupos e mata-mata."""
+    champions_count = Counter()
+    for _ in range(num_editions):
+        # Seleção ponderada das 48 qualificadas
+        indices = np.random.choice(len(teams), size=48, replace=False, p=probs)
+        qualified = [teams[i] for i in indices]
+        random.shuffle(qualified)
+        groups = [qualified[j:j+4] for j in range(0, 48, 4)]
+        # Fase de grupos (12 grupos de 4)
+        group_results = []
+        for group in groups:
+            stats_list = [TeamStats(t) for t in group]
+            for s1, s2 in combinations(stats_list, 2):
+                play_match(s1, s2)
+            ranked_group = rank_teams(stats_list)
+            group_results.append(ranked_group)
+        # Classificação: top 2 de cada grupo + 8 melhores terceiros
+        top2s = []
+        for g in group_results:
+            top2s.extend([g[0], g[1]])
+        thirds = [g[2] for g in group_results]
+        best_thirds = rank_teams(thirds)[:8]
+        advancers = [ts.team for ts in top2s + best_thirds]
+        # Mata-mata
+        winner = simulate_knockout(advancers)
+        champions_count[winner.name] += 1
+    return champions_count
+
+if __name__ == '__main__':
+    champions = simulate_world_cup(10)
+    print_results(champions)
